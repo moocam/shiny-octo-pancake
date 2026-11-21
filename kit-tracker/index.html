@@ -1,0 +1,426 @@
+<title>Flowmo Kit</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Barlow:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: sticky header with location tally, search, then kit grouped by location; bulk-move bar docks at the bottom. */
+:root {
+  --bg: #f3f4f5;
+  --surface: #ffffff;
+  --ink: #16191d;
+  --muted: #5d6570;
+  --line: #d9dde2;
+  --accent: #e08a00;      /* case-label amber */
+  --accent-ink: #1b1300;
+  --accent-soft: #fdf0d9;
+  --danger: #b3261e;
+  --font-display: "Barlow Condensed", "Arial Narrow", system-ui, sans-serif;
+  --font-body: "Barlow", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #121417; --surface: #1b1f24; --ink: #eceef1; --muted: #9aa3ae; --line: #2c323a;
+    --accent: #f2a531; --accent-ink: #1b1300; --accent-soft: #33280f; --danger: #f2756b;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #121417; --surface: #1b1f24; --ink: #eceef1; --muted: #9aa3ae; --line: #2c323a;
+  --accent: #f2a531; --accent-ink: #1b1300; --accent-soft: #33280f; --danger: #f2756b;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body {
+  background: var(--bg); color: var(--ink);
+  font-family: var(--font-body); font-size: 16px; line-height: 1.4;
+}
+body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 10; background: var(--bg); }
+.wrap {
+  max-width: 760px; margin: 0 auto;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 0 120px;
+}
+header {
+  position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5;
+  background: var(--bg); padding-block: 14px 10px;
+  display: grid; gap: 10px; border-bottom: 1px solid var(--line);
+}
+.toprow { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+h1 {
+  font-family: var(--font-display); font-weight: 700; font-size: 1.9rem;
+  letter-spacing: .02em; text-transform: uppercase; margin: 0; flex: 1; line-height: 1;
+}
+h1 span { color: var(--accent); }
+.count { font-family: var(--font-mono); font-size: .8rem; color: var(--muted); }
+button, select, input, textarea { font: inherit; color: inherit; }
+.btn {
+  border: 1px solid var(--line); background: var(--surface); border-radius: 6px;
+  padding: 8px 12px; cursor: pointer; font-weight: 600; font-size: .9rem;
+}
+.btn:hover { border-color: var(--muted); }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.btn.danger { color: var(--danger); }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.search {
+  width: 100%; padding: 10px 12px; border: 1px solid var(--line); border-radius: 6px;
+  background: var(--surface);
+}
+.chips { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 2px; scrollbar-width: none; }
+.chip {
+  flex: none; border: 1px solid var(--line); background: var(--surface); border-radius: 999px;
+  padding: 5px 11px; cursor: pointer; font-size: .85rem; white-space: nowrap;
+  display: inline-flex; gap: 6px; align-items: baseline;
+}
+.chip b { font-family: var(--font-mono); font-weight: 500; font-size: .78rem; color: var(--muted); }
+.chip[aria-pressed="true"] { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+.chip[aria-pressed="true"] b { color: var(--bg); opacity: .75; }
+
+main { display: grid; gap: 22px; padding-top: 16px; }
+.group h2 {
+  font-family: var(--font-display); font-weight: 600; text-transform: uppercase;
+  letter-spacing: .08em; font-size: 1rem; color: var(--muted); margin: 0 0 6px;
+  display: flex; justify-content: space-between;
+}
+.group h2 .n { font-family: var(--font-mono); font-size: .8rem; letter-spacing: 0; }
+.list { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.item {
+  display: grid; grid-template-columns: auto 1fr auto; gap: 10px; align-items: center;
+  padding: 10px 12px; border-top: 1px solid var(--line);
+}
+.item:first-child { border-top: 0; }
+.item.sel { background: var(--accent-soft); }
+.item input[type=checkbox] { width: 20px; height: 20px; accent-color: var(--accent); }
+.info { min-width: 0; cursor: pointer; background: none; border: 0; padding: 0; text-align: left; }
+.info .name { font-weight: 600; overflow-wrap: anywhere; }
+.info .meta { font-size: .8rem; color: var(--muted); display: flex; gap: 8px; flex-wrap: wrap; }
+.info .meta .serial { font-family: var(--font-mono); }
+.move {
+  max-width: 150px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px;
+  background: var(--bg); font-size: .85rem;
+}
+.empty { text-align: center; padding: 48px 16px; color: var(--muted); display: grid; gap: 12px; justify-items: center; }
+.empty strong { font-family: var(--font-display); font-size: 1.4rem; text-transform: uppercase; color: var(--ink); letter-spacing: .04em; }
+.status { font-size: .85rem; color: var(--muted); text-align: center; padding: 12px; }
+
+.bulk {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 6;
+  background: var(--ink); color: var(--bg);
+  padding-block: 12px calc(12px + env(safe-area-inset-bottom, 0px));
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+.bulk .in { max-width: 760px; margin: 0 auto; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.bulk .in span { flex: 1; font-weight: 600; min-width: 90px; }
+.bulk select { padding: 8px; border-radius: 6px; border: 0; background: var(--surface); color: var(--ink); max-width: 100%; }
+
+dialog {
+  border: 1px solid var(--line); border-radius: 10px; background: var(--surface); color: var(--ink);
+  width: min(520px, calc(100vw - 32px)); padding: 0;
+}
+dialog::backdrop { background: rgba(10, 12, 15, .5); }
+.dlg { padding: 18px; display: grid; gap: 12px; }
+.dlg h3 { font-family: var(--font-display); text-transform: uppercase; letter-spacing: .04em; margin: 0; font-size: 1.4rem; }
+label { display: grid; gap: 4px; font-size: .85rem; font-weight: 600; color: var(--muted); }
+label input, label select, label textarea {
+  padding: 9px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg);
+  font-weight: 400; color: var(--ink); width: 100%;
+}
+textarea { min-height: 140px; resize: vertical; }
+.row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+@media (max-width: 440px) { .row2 { grid-template-columns: 1fr; } .move { max-width: 120px; } }
+.actions { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }
+.actions .left { margin-right: auto; }
+.tabs { display: flex; gap: 6px; }
+.loc-row { display: flex; gap: 8px; align-items: center; }
+.loc-row input { flex: 1; min-width: 0; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); }
+.loc-row .n { font-family: var(--font-mono); font-size: .8rem; color: var(--muted); width: 3ch; text-align: right; }
+.hint { font-size: .8rem; color: var(--muted); margin: 0; }
+.toast {
+  position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(80px + env(safe-area-inset-bottom, 0px));
+  background: var(--ink); color: var(--bg); padding: 8px 14px; border-radius: 6px; font-size: .9rem; z-index: 20;
+}
+@media (prefers-reduced-motion: no-preference) { .item { transition: background .15s; } }
+</style>
+
+<div class="wrap">
+  <header>
+    <div class="toprow">
+      <h1>Flowmo <span>Kit</span></h1>
+      <span class="count" id="total"></span>
+      <button class="btn" id="btnLocs" type="button">Locations</button>
+      <button class="btn primary" id="btnAdd" type="button">Add kit</button>
+    </div>
+    <input class="search" id="q" type="search" placeholder="Search name, serial, notes" autocomplete="off">
+    <div class="chips" id="chips" role="toolbar" aria-label="Filter by location"></div>
+  </header>
+  <main id="main">
+    <p class="status" id="status">Loading your kit…</p>
+  </main>
+</div>
+
+<div class="bulk" id="bulk" hidden>
+  <div class="in">
+    <span id="bulkN"></span>
+    <select id="bulkTo" aria-label="Move selected to"></select>
+    <button class="btn primary" id="bulkGo" type="button">Move</button>
+    <button class="btn" id="bulkClear" type="button">Clear</button>
+  </div>
+</div>
+
+<dialog id="dlgItem">
+  <form class="dlg" id="formItem" method="dialog">
+    <h3 id="itemTitle">Add kit</h3>
+    <div class="tabs" id="addTabs">
+      <button class="chip" type="button" data-tab="one" aria-pressed="true">One item</button>
+      <button class="chip" type="button" data-tab="many" aria-pressed="false">Paste a list</button>
+    </div>
+    <div id="tabOne" style="display:grid;gap:12px">
+      <label>Name<input id="fName" placeholder="e.g. Sony FX6 body" autocomplete="off"></label>
+      <div class="row2">
+        <label>Category<input id="fCat" list="cats" placeholder="Camera, Lens, Audio…" autocomplete="off"></label>
+        <label>Serial<input id="fSerial" autocomplete="off"></label>
+      </div>
+      <label>Notes<input id="fNotes" autocomplete="off"></label>
+    </div>
+    <div id="tabMany" hidden style="display:grid;gap:12px">
+      <label>One item per line<textarea id="fMany" placeholder="Sony FX6 body&#10;Canon 24-70 f/2.8&#10;V-mount battery x4"></textarea></label>
+      <p class="hint">Optional: add a category after a comma, e.g. "Sennheiser MKH 416, Audio".</p>
+    </div>
+    <label>Location<select id="fLoc"></select></label>
+    <div class="actions">
+      <button class="btn danger left" id="btnDel" type="button" hidden>Delete</button>
+      <button class="btn" type="button" data-close>Cancel</button>
+      <button class="btn primary" id="btnSave" type="submit">Save</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="dlgLocs">
+  <div class="dlg">
+    <h3>Locations</h3>
+    <p class="hint">Cases, bags, the van, home store, hire house. Rename by editing; a location can be removed once it's empty.</p>
+    <div id="locList" style="display:grid;gap:8px"></div>
+    <div class="loc-row">
+      <input id="newLoc" placeholder="New location, e.g. Peli 1510 #2" autocomplete="off">
+      <button class="btn primary" id="btnNewLoc" type="button">Add</button>
+    </div>
+    <div class="actions"><button class="btn" type="button" data-close>Done</button></div>
+  </div>
+</dialog>
+
+<datalist id="cats"></datalist>
+
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const state = { items: [], locs: [], filter: "all", q: "", selected: new Set(), editing: null, tab: "one", itemsReady: false, locsReady: false };
+  let db = null;
+
+  // ---------- helpers ----------
+  const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  const locName = (id) => state.locs.find((l) => l.id === id)?.name || "Unassigned";
+  let toastTimer;
+  function toast(msg) {
+    let t = document.querySelector(".toast");
+    if (!t) { t = document.createElement("div"); t.className = "toast"; t.setAttribute("role", "status"); document.body.appendChild(t); }
+    t.textContent = msg; t.hidden = false;
+    clearTimeout(toastTimer); toastTimer = setTimeout(() => { t.hidden = true; }, 2200);
+  }
+  function fail(e) { console.error(e); toast(e?.code === "permission_denied" ? "Only the owner can change this list." : "Couldn't save. Check your connection and try again."); }
+  const locOptions = (selected, withUnassigned) =>
+    (withUnassigned ? `<option value="">Unassigned</option>` : "") +
+    state.locs.map((l) => `<option value="${esc(l.id)}"${l.id === selected ? " selected" : ""}>${esc(l.name)}</option>`).join("");
+
+  // ---------- render ----------
+  function render() {
+    const ready = state.itemsReady && state.locsReady;
+    $("total").textContent = ready ? `${state.items.length} items` : "";
+    const counts = {};
+    state.items.forEach((i) => { const k = state.locs.some((l) => l.id === i.locationId) ? i.locationId : ""; counts[k] = (counts[k] || 0) + 1; });
+
+    const chipData = [{ id: "all", name: "All", n: state.items.length }, ...state.locs.map((l) => ({ id: l.id, name: l.name, n: counts[l.id] || 0 }))];
+    if (counts[""]) chipData.push({ id: "", name: "Unassigned", n: counts[""] });
+    $("chips").innerHTML = chipData.map((c) => `<button class="chip" type="button" data-f="${esc(c.id)}" aria-pressed="${state.filter === c.id}">${esc(c.name)} <b>${c.n}</b></button>`).join("");
+
+    const cats = [...new Set(state.items.map((i) => i.category).filter(Boolean))].sort();
+    $("cats").innerHTML = cats.map((c) => `<option value="${esc(c)}">`).join("");
+
+    const main = $("main");
+    if (!ready) return;
+    if (!state.items.length) {
+      main.innerHTML = `<div class="empty"><strong>No kit yet</strong><span>Add items one at a time, or paste your whole list and drop it into a location.</span><button class="btn primary" type="button" data-act="add">Add kit</button></div>`;
+      return;
+    }
+    const q = state.q.trim().toLowerCase();
+    const visible = state.items.filter((i) => {
+      const lid = state.locs.some((l) => l.id === i.locationId) ? i.locationId : "";
+      if (state.filter !== "all" && lid !== state.filter) return false;
+      if (!q) return true;
+      return [i.name, i.category, i.serial, i.notes].some((v) => String(v || "").toLowerCase().includes(q));
+    });
+    if (!visible.length) { main.innerHTML = `<p class="status">Nothing matches.</p>`; return; }
+
+    const groups = [...state.locs.map((l) => ({ id: l.id, name: l.name })), { id: "", name: "Unassigned" }]
+      .map((g) => ({ ...g, items: visible.filter((i) => (state.locs.some((l) => l.id === i.locationId) ? i.locationId : "") === g.id) }))
+      .filter((g) => g.items.length);
+
+    main.innerHTML = groups.map((g) => `
+      <section class="group">
+        <h2><span>${esc(g.name)}</span><span class="n">${g.items.length}</span></h2>
+        <div class="list">${g.items.sort((a, b) => (a.category || "").localeCompare(b.category || "") || a.name.localeCompare(b.name)).map((i) => `
+          <div class="item${state.selected.has(i.id) ? " sel" : ""}">
+            <input type="checkbox" data-sel="${esc(i.id)}" aria-label="Select ${esc(i.name)}"${state.selected.has(i.id) ? " checked" : ""}>
+            <button class="info" type="button" data-edit="${esc(i.id)}">
+              <div class="name">${esc(i.name)}</div>
+              <div class="meta">${i.category ? `<span>${esc(i.category)}</span>` : ""}${i.serial ? `<span class="serial">S/N ${esc(i.serial)}</span>` : ""}${i.notes ? `<span>${esc(i.notes)}</span>` : ""}</div>
+            </button>
+            <select class="move" data-move="${esc(i.id)}" aria-label="Location of ${esc(i.name)}">${locOptions(g.id, !g.id)}</select>
+          </div>`).join("")}
+        </div>
+      </section>`).join("");
+  }
+
+  function renderBulk() {
+    const n = state.selected.size;
+    $("bulk").hidden = n === 0;
+    $("bulkN").textContent = `${n} selected`;
+    const keep = $("bulkTo").value;
+    $("bulkTo").innerHTML = locOptions(keep || state.locs[0]?.id);
+  }
+
+  // ---------- writes ----------
+  async function moveItem(id, locationId) {
+    try { await db.collection("items").doc(id).update({ locationId, updatedAt: Date.now() }); toast(`Moved to ${locName(locationId)}`); }
+    catch (e) { fail(e); render(); }
+  }
+
+  // ---------- events ----------
+  $("chips").addEventListener("click", (e) => { const b = e.target.closest("[data-f]"); if (!b) return; state.filter = b.dataset.f; render(); });
+  $("q").addEventListener("input", (e) => { state.q = e.target.value; render(); });
+  $("main").addEventListener("change", (e) => {
+    const s = e.target.closest("[data-move]"); if (s) { moveItem(s.dataset.move, s.value); return; }
+    const c = e.target.closest("[data-sel]"); if (c) { c.checked ? state.selected.add(c.dataset.sel) : state.selected.delete(c.dataset.sel); c.closest(".item").classList.toggle("sel", c.checked); renderBulk(); }
+  });
+  $("main").addEventListener("click", (e) => {
+    const ed = e.target.closest("[data-edit]"); if (ed) openItem(ed.dataset.edit);
+    if (e.target.closest("[data-act=add]")) openItem(null);
+  });
+  $("bulkClear").onclick = () => { state.selected.clear(); renderBulk(); render(); };
+  $("bulkGo").onclick = async () => {
+    const to = $("bulkTo").value; const ids = [...state.selected];
+    $("bulkGo").disabled = true;
+    try {
+      for (const id of ids) await db.collection("items").doc(id).update({ locationId: to, updatedAt: Date.now() });
+      toast(`Moved ${ids.length} to ${locName(to)}`); state.selected.clear(); renderBulk(); render();
+    } catch (e) { fail(e); } finally { $("bulkGo").disabled = false; }
+  };
+
+  document.querySelectorAll("[data-close]").forEach((b) => b.addEventListener("click", () => b.closest("dialog").close()));
+
+  function setTab(t) {
+    state.tab = t;
+    $("tabOne").hidden = t !== "one"; $("tabMany").hidden = t !== "many";
+    $("addTabs").querySelectorAll("[data-tab]").forEach((b) => b.setAttribute("aria-pressed", b.dataset.tab === t));
+  }
+  $("addTabs").addEventListener("click", (e) => { const b = e.target.closest("[data-tab]"); if (b) setTab(b.dataset.tab); });
+
+  function openItem(id) {
+    if (!db) { toast("Sign in to claude.ai to edit your kit."); return; }
+    state.editing = id;
+    const it = id ? state.items.find((i) => i.id === id) : null;
+    $("itemTitle").textContent = it ? "Edit kit" : "Add kit";
+    $("addTabs").hidden = !!it; setTab("one");
+    $("fName").value = it?.name || ""; $("fCat").value = it?.category || "";
+    $("fSerial").value = it?.serial || ""; $("fNotes").value = it?.notes || ""; $("fMany").value = "";
+    const defLoc = it ? it.locationId : (state.filter !== "all" && state.filter ? state.filter : state.locs[0]?.id);
+    $("fLoc").innerHTML = locOptions(defLoc, !state.locs.length);
+    $("btnDel").hidden = !it; $("btnDel").textContent = "Delete"; $("btnDel").dataset.armed = "";
+    $("dlgItem").showModal(); setTimeout(() => $("fName").focus(), 0);
+  }
+  $("btnAdd").onclick = () => openItem(null);
+
+  $("formItem").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const locationId = $("fLoc").value; const now = Date.now();
+    try {
+      if (state.tab === "many" && !state.editing) {
+        const lines = $("fMany").value.split("\n").map((l) => l.trim()).filter(Boolean);
+        if (!lines.length) { toast("Paste at least one item."); return; }
+        $("btnSave").disabled = true;
+        for (const line of lines) {
+          const [name, ...rest] = line.split(",");
+          await db.collection("items").add({ name: name.trim(), category: rest.join(",").trim(), serial: "", notes: "", locationId, updatedAt: now });
+        }
+        toast(`Added ${lines.length} items`);
+      } else {
+        const name = $("fName").value.trim();
+        if (!name) { toast("Give the item a name."); $("fName").focus(); return; }
+        const body = { name, category: $("fCat").value.trim(), serial: $("fSerial").value.trim(), notes: $("fNotes").value.trim(), locationId, updatedAt: now };
+        $("btnSave").disabled = true;
+        if (state.editing) await db.collection("items").doc(state.editing).set(body);
+        else await db.collection("items").add(body);
+        toast(state.editing ? "Saved" : `Added to ${locName(locationId)}`);
+      }
+      $("dlgItem").close();
+    } catch (err) { fail(err); } finally { $("btnSave").disabled = false; }
+  });
+
+  $("btnDel").onclick = async () => {
+    const b = $("btnDel");
+    if (!b.dataset.armed) { b.dataset.armed = "1"; b.textContent = "Tap again to delete"; return; }
+    try { await db.collection("items").doc(state.editing).delete(); state.selected.delete(state.editing); renderBulk(); toast("Deleted"); $("dlgItem").close(); }
+    catch (e) { fail(e); }
+  };
+
+  // ---------- locations ----------
+  function renderLocs() {
+    $("locList").innerHTML = state.locs.map((l) => {
+      const n = state.items.filter((i) => i.locationId === l.id).length;
+      return `<div class="loc-row"><input value="${esc(l.name)}" data-rename="${esc(l.id)}" aria-label="Rename ${esc(l.name)}"><span class="n">${n}</span>
+        <button class="btn danger" type="button" data-rmloc="${esc(l.id)}"${n ? " disabled title=\"Move its kit out first\"" : ""}>Remove</button></div>`;
+    }).join("") || `<p class="hint">No locations yet.</p>`;
+  }
+  $("btnLocs").onclick = () => { if (!db) { toast("Sign in to claude.ai to edit your kit."); return; } renderLocs(); $("dlgLocs").showModal(); };
+  $("locList").addEventListener("change", async (e) => {
+    const inp = e.target.closest("[data-rename]"); if (!inp) return;
+    const name = inp.value.trim(); if (!name) { renderLocs(); return; }
+    try { await db.collection("locations").doc(inp.dataset.rename).update({ name }); toast("Renamed"); } catch (err) { fail(err); }
+  });
+  $("locList").addEventListener("click", async (e) => {
+    const b = e.target.closest("[data-rmloc]"); if (!b) return;
+    if (!b.dataset.armed) { b.dataset.armed = "1"; b.textContent = "Sure?"; return; }
+    try { await db.collection("locations").doc(b.dataset.rmloc).delete(); if (state.filter === b.dataset.rmloc) state.filter = "all"; toast("Removed"); } catch (err) { fail(err); }
+  });
+  async function addLoc() {
+    const name = $("newLoc").value.trim(); if (!name) return;
+    const order = Math.max(0, ...state.locs.map((l) => l.order || 0)) + 1;
+    try { await db.collection("locations").add({ name, order }); $("newLoc").value = ""; toast(`Added ${name}`); } catch (err) { fail(err); }
+  }
+  $("btnNewLoc").onclick = addLoc;
+  $("newLoc").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); addLoc(); } });
+
+  // ---------- boot ----------
+  render();
+  (async () => {
+    const timer = setTimeout(() => { if (!state.itemsReady) $("status").textContent = "Still loading. If this doesn't clear, open the page signed in to claude.ai."; }, 10000);
+    db = await claude.use("db");
+    if (!db) { clearTimeout(timer); $("main").innerHTML = `<p class="status">Sign in to claude.ai to see your kit.</p>`; return; }
+    const onErr = (e) => { clearTimeout(timer); console.error(e); $("main").innerHTML = `<p class="status">Couldn't load your kit (${esc(e?.code || "error")}). Reload the page to try again.</p>`; };
+    db.collection("locations").onSnapshot((snap) => {
+      state.locs = snap.docs.map((d) => ({ id: d.id, ...d.data() })).sort((a, b) => (a.order || 0) - (b.order || 0) || a.name.localeCompare(b.name));
+      state.locsReady = true; render(); renderBulk();
+      if ($("dlgLocs").open) renderLocs();
+    }, onErr);
+    db.collection("items").onSnapshot((snap) => {
+      clearTimeout(timer);
+      state.items = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      const ids = new Set(state.items.map((i) => i.id));
+      [...state.selected].forEach((id) => { if (!ids.has(id)) state.selected.delete(id); });
+      state.itemsReady = true; render(); renderBulk();
+      if ($("dlgLocs").open) renderLocs();
+    }, onErr);
+  })();
+})();
+</script>
