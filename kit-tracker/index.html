@@ -156,6 +156,17 @@ body.pack .item input[type=checkbox] { width: 24px; height: 24px; }
 .item.packed { opacity: .5; }
 .item.packed .name { text-decoration: line-through; text-decoration-color: var(--muted); }
 .done { color: var(--accent); }
+.job { border: 1px solid var(--line); border-radius: 8px; background: var(--bg); }
+.job > button.jh { width: 100%; display: grid; grid-template-columns: 1fr auto; gap: 2px 10px; padding: 10px 12px; background: none; border: 0; text-align: left; cursor: pointer; }
+.jh .jn { font-weight: 600; overflow-wrap: anywhere; }
+.jh .jd { font-size: .8rem; color: var(--muted); }
+.jh .jc { font-family: var(--font-mono); font-size: .8rem; grid-row: span 2; align-self: center; }
+.jh .jc.missing { color: var(--danger); }
+.jbody { padding: 0 12px 12px; display: grid; gap: 4px; }
+.jbody .loc { font-family: var(--font-display); text-transform: uppercase; letter-spacing: .08em; font-size: .85rem; color: var(--muted); margin-top: 8px; }
+.jitem { display: flex; gap: 10px; align-items: center; font-size: .95rem; cursor: pointer; color: var(--ink); font-weight: 400; }
+.jitem input { width: 20px; height: 20px; accent-color: var(--accent); flex: none; }
+.jitem.back span { color: var(--muted); }
 label.item { font-size: inherit; font-weight: 400; color: var(--ink); cursor: pointer; }
 </style>
 
@@ -175,7 +186,9 @@ label.item { font-size: inherit; font-weight: 400; color: var(--ink); cursor: po
       <input id="jobName" placeholder="Job name, e.g. Matchroom, Sheffield" autocomplete="off" aria-label="Job name">
       <span class="ptext" id="ptext"></span>
       <button class="chip" type="button" id="hidePacked" aria-pressed="false">Hide packed</button>
-      <button class="btn" type="button" id="newJob">Start new job</button>
+      <button class="btn primary" type="button" id="finishJob">Finish job</button>
+      <button class="btn" type="button" id="newJob">Clear ticks</button>
+      <button class="btn" type="button" id="btnHist">History</button>
       <div class="progress" aria-hidden="true"><i id="pbar"></i></div>
     </div>
     <input class="search" id="q" type="search" placeholder="Search name, serial, notes" autocomplete="off">
@@ -236,13 +249,22 @@ label.item { font-size: inherit; font-weight: 400; color: var(--ink); cursor: po
   </div>
 </dialog>
 
+<dialog id="dlgHist">
+  <div class="dlg">
+    <h3>Job history</h3>
+    <p class="hint">Each finished job keeps what was packed. Tick items off as they come back.</p>
+    <div id="histList" style="display:grid;gap:10px"></div>
+    <div class="actions"><button class="btn" type="button" data-close>Done</button></div>
+  </div>
+</dialog>
+
 <datalist id="cats"></datalist>
 
 <script>
 (() => {
   const $ = (id) => document.getElementById(id);
   const state = { items: [], locs: [], filter: "all", q: "", selected: new Set(), editing: null, tab: "one", itemsReady: false, locsReady: false,
-    mode: "kit", hidePacked: false, pack: { job: "", ticked: {} } };
+    mode: "kit", hidePacked: false, pack: { job: "", ticked: {}, startedAt: 0 }, jobs: [], openJob: null };
   try { if (localStorage.getItem("mode") === "pack") state.mode = "pack"; } catch (e) {}
   const isPacked = (id) => !!state.pack.ticked[id];
   let db = null;
@@ -362,7 +384,7 @@ label.item { font-size: inherit; font-weight: 400; color: var(--ink); cursor: po
   async function flushPack() {
     if (packInflight || !db) return;
     packInflight = true; packDirty = false;
-    try { await db.doc("packs/current").set({ job: state.pack.job || "", ticked: { ...state.pack.ticked }, updatedAt: Date.now() }); }
+    try { await db.doc("packs/current").set({ job: state.pack.job || "", ticked: { ...state.pack.ticked }, startedAt: state.pack.startedAt || 0, updatedAt: Date.now() }); }
     catch (e) { fail(e); }
     finally { packInflight = false; if (packDirty) flushPack(); }
   }
@@ -375,10 +397,82 @@ label.item { font-size: inherit; font-weight: 400; color: var(--ink); cursor: po
   $("jobName").addEventListener("input", (e) => { state.pack.job = e.target.value; savePack(); });
   $("newJob").onclick = () => {
     const b = $("newJob");
-    if (!b.dataset.armed) { b.dataset.armed = "1"; b.textContent = "Clear all ticks?"; setTimeout(() => { b.dataset.armed = ""; b.textContent = "Start new job"; }, 4000); return; }
-    b.dataset.armed = ""; b.textContent = "Start new job";
-    state.pack = { job: "", ticked: {} }; savePack(); render(); toast("Ticks cleared. Ready for the next job."); $("jobName").focus();
+    if (!b.dataset.armed) { b.dataset.armed = "1"; b.textContent = "Clear without saving?"; setTimeout(() => { b.dataset.armed = ""; b.textContent = "Clear ticks"; }, 4000); return; }
+    b.dataset.armed = ""; b.textContent = "Clear ticks";
+    state.pack = { job: "", ticked: {}, startedAt: 0 }; savePack(); render(); toast("Ticks cleared."); $("jobName").focus();
   };
+
+  // ---------- job history ----------
+  const fmtDate = (ms) => ms ? new Date(ms).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" }) : "";
+  $("finishJob").onclick = async () => {
+    const ids = Object.keys(state.pack.ticked).filter((id) => state.pack.ticked[id]);
+    const packed = state.items.filter((i) => ids.includes(i.id));
+    if (!packed.length) { toast("Tick what you packed first."); return; }
+    const job = (state.pack.job || "").trim();
+    if (!job) { toast("Give the job a name first."); $("jobName").focus(); return; }
+    $("finishJob").disabled = true;
+    try {
+      await db.collection("jobs").add({
+        job, startedAt: state.pack.startedAt || Date.now(), finishedAt: Date.now(),
+        items: packed.map((i) => ({ id: i.id, name: i.name, location: locName(i.locationId) })),
+        returned: {},
+      });
+      state.pack = { job: "", ticked: {}, startedAt: 0 }; savePack(); render();
+      toast(`Saved "${job}" with ${packed.length} items`);
+    } catch (e) { fail(e); } finally { $("finishJob").disabled = false; }
+  };
+
+  function renderHist() {
+    if (!state.jobs.length) { $("histList").innerHTML = `<p class="hint">No finished jobs yet. Pack for a job, then tap Finish job to save it here.</p>`; return; }
+    $("histList").innerHTML = state.jobs.map((j) => {
+      const items = j.items || [], ret = j.returned || {};
+      const back = items.filter((i) => ret[i.id]).length, open = state.openJob === j.id;
+      const byLoc = {};
+      items.forEach((i) => { (byLoc[i.location || "Unassigned"] ||= []).push(i); });
+      return `<div class="job">
+        <button class="jh" type="button" data-job="${esc(j.id)}" aria-expanded="${open}">
+          <span class="jn">${esc(j.job)}</span>
+          <span class="jc${back < items.length ? " missing" : ""}">${back === items.length ? "All back" : `${back}/${items.length} back`}</span>
+          <span class="jd">${esc(fmtDate(j.finishedAt))} · ${items.length} items</span>
+        </button>
+        ${open ? `<div class="jbody">
+          ${Object.entries(byLoc).map(([loc, its]) => `<div class="loc">${esc(loc)}</div>` + its.map((i) => `
+            <label class="jitem${ret[i.id] ? " back" : ""}"><input type="checkbox" data-ret="${esc(j.id)}|${esc(i.id)}"${ret[i.id] ? " checked" : ""}><span>${esc(i.name)}</span></label>`).join("")).join("")}
+          <div class="actions" style="margin-top:8px">
+            <button class="btn" type="button" data-allback="${esc(j.id)}">Mark all back</button>
+            <button class="btn danger" type="button" data-deljob="${esc(j.id)}">Delete job</button>
+          </div>
+        </div>` : ""}
+      </div>`;
+    }).join("");
+  }
+  $("btnHist").onclick = () => { renderHist(); $("dlgHist").showModal(); };
+  // Returned ticks: one write per tap, chained so a doc never has two writes in flight.
+  let jobChain = Promise.resolve();
+  function writeReturned(jobId, returned) {
+    const j = state.jobs.find((x) => x.id === jobId); if (j) j.returned = returned;
+    renderHist();
+    jobChain = jobChain.then(() => db.collection("jobs").doc(jobId).update({ returned })).catch(fail);
+  }
+  $("histList").addEventListener("click", async (e) => {
+    const h = e.target.closest("[data-job]");
+    if (h) { state.openJob = state.openJob === h.dataset.job ? null : h.dataset.job; renderHist(); return; }
+    const all = e.target.closest("[data-allback]");
+    if (all) { const j = state.jobs.find((x) => x.id === all.dataset.allback); const r = {}; (j.items || []).forEach((i) => { r[i.id] = true; }); writeReturned(j.id, r); return; }
+    const d = e.target.closest("[data-deljob]");
+    if (d) {
+      if (!d.dataset.armed) { d.dataset.armed = "1"; d.textContent = "Tap again to delete"; return; }
+      try { await db.collection("jobs").doc(d.dataset.deljob).delete(); state.openJob = null; toast("Job deleted"); } catch (err) { fail(err); }
+    }
+  });
+  $("histList").addEventListener("change", (e) => {
+    const c = e.target.closest("[data-ret]"); if (!c) return;
+    const [jobId, itemId] = c.dataset.ret.split("|");
+    const j = state.jobs.find((x) => x.id === jobId); if (!j) return;
+    const r = { ...(j.returned || {}) };
+    if (c.checked) r[itemId] = true; else delete r[itemId];
+    writeReturned(jobId, r);
+  });
 
   // ---------- events ----------
   $("chips").addEventListener("click", (e) => { const b = e.target.closest("[data-f]"); if (!b) return; state.filter = b.dataset.f; render(); });
@@ -388,7 +482,7 @@ label.item { font-size: inherit; font-weight: 400; color: var(--ink); cursor: po
     if (t) {
       const ticked = { ...state.pack.ticked };
       if (t.checked) ticked[t.dataset.tick] = true; else delete ticked[t.dataset.tick];
-      state.pack = { ...state.pack, ticked }; savePack();
+      state.pack = { ...state.pack, ticked, startedAt: state.pack.startedAt || Date.now() }; savePack();
       if (state.hidePacked) setTimeout(render, 250); else render();
       return;
     }
@@ -508,8 +602,13 @@ label.item { font-size: inherit; font-weight: 400; color: var(--ink); cursor: po
     db.doc("packs/current").onSnapshot((snap) => {
       if (packDirty || packInflight) return;
       const d = snap.exists ? snap.data() : {};
-      state.pack = { job: d.job || "", ticked: { ...(d.ticked || {}) } };
+      state.pack = { job: d.job || "", ticked: { ...(d.ticked || {}) }, startedAt: d.startedAt || 0 };
       render();
+    }, (e) => console.error(e));
+    db.collection("jobs").onSnapshot((snap) => {
+      state.jobs = snap.docs.map((d) => { const x = d.data(); return { id: d.id, ...x, returned: { ...(x.returned || {}) } }; })
+        .sort((a, b) => (b.finishedAt || 0) - (a.finishedAt || 0));
+      if ($("dlgHist").open) renderHist();
     }, (e) => console.error(e));
     db.collection("items").onSnapshot((snap) => {
       clearTimeout(timer);
