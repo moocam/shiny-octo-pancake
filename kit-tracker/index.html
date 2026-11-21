@@ -137,6 +137,8 @@ textarea { min-height: 140px; resize: vertical; }
 .loc-row input { flex: 1; min-width: 0; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); }
 .loc-row .n { font-family: var(--font-mono); font-size: .8rem; color: var(--muted); width: 3ch; text-align: right; }
 .hint { font-size: .8rem; color: var(--muted); margin: 0; }
+.loc-row input.kgin { flex: 0 0 72px; width: 72px; font-family: var(--font-mono); font-size: .85rem; }
+.group h2 .kg { font-family: var(--font-mono); font-size: .8rem; letter-spacing: 0; text-transform: none; margin-left: 6px; opacity: .8; }
 .toast {
   position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(80px + env(safe-area-inset-bottom, 0px));
   background: var(--ink); color: var(--bg); padding: 8px 14px; border-radius: 6px; font-size: .9rem; z-index: 20;
@@ -239,7 +241,7 @@ label.item { font-size: inherit; font-weight: 400; color: var(--ink); cursor: po
 <dialog id="dlgLocs">
   <div class="dlg">
     <h3>Locations</h3>
-    <p class="hint">Cases, bags, the van, home store, hire house. Rename by editing; a location can be removed once it's empty.</p>
+    <p class="hint">Cases, bags, the van, home store, hire house. Rename by editing, add a packed weight in kg if you know it. A location can be removed once it's empty.</p>
     <div id="locList" style="display:grid;gap:8px"></div>
     <div class="loc-row">
       <input id="newLoc" placeholder="New location, e.g. Peli 1510 #2" autocomplete="off">
@@ -332,13 +334,13 @@ label.item { font-size: inherit; font-weight: 400; color: var(--ink); cursor: po
     });
     if (!visible.length) { main.innerHTML = `<p class="status">${pack && state.hidePacked ? "Everything here is packed." : "Nothing matches."}</p>`; return; }
 
-    const groups = [...state.locs.map((l) => ({ id: l.id, name: l.name })), { id: "", name: "Unassigned" }]
+    const groups = [...state.locs.map((l) => ({ id: l.id, name: l.name, weight: l.weight })), { id: "", name: "Unassigned" }]
       .map((g) => ({ ...g, items: visible.filter((i) => (state.locs.some((l) => l.id === i.locationId) ? i.locationId : "") === g.id) }))
       .filter((g) => g.items.length);
 
     main.innerHTML = groups.map((g) => `
       <section class="group">
-        <h2><span>${esc(g.name)}</span><span class="n">${pack ? `${packedCounts[g.id] || 0}/${counts[g.id] || 0} packed` : g.items.length}</span></h2>
+        <h2><span>${esc(g.name)}${g.weight ? ` <span class="kg">${esc(g.weight)} kg</span>` : ""}</span><span class="n">${pack ? `${packedCounts[g.id] || 0}/${counts[g.id] || 0} packed` : g.items.length}</span></h2>
         <div class="list">${g.items.sort((a, b) => (a.category || "").localeCompare(b.category || "") || a.name.localeCompare(b.name)).map((i) => pack ? `
           <label class="item${isPacked(i.id) ? " packed" : ""}">
             <input type="checkbox" data-tick="${esc(i.id)}"${isPacked(i.id) ? " checked" : ""}>
@@ -564,12 +566,20 @@ label.item { font-size: inherit; font-weight: 400; color: var(--ink); cursor: po
   function renderLocs() {
     $("locList").innerHTML = state.locs.map((l) => {
       const n = state.items.filter((i) => i.locationId === l.id).length;
-      return `<div class="loc-row"><input value="${esc(l.name)}" data-rename="${esc(l.id)}" aria-label="Rename ${esc(l.name)}"><span class="n">${n}</span>
+      return `<div class="loc-row"><input value="${esc(l.name)}" data-rename="${esc(l.id)}" aria-label="Rename ${esc(l.name)}">
+        <input class="kgin" type="number" inputmode="decimal" min="0" step="0.1" value="${esc(l.weight ?? "")}" data-weight="${esc(l.id)}" placeholder="kg" aria-label="Weight of ${esc(l.name)} in kg"><span class="n">${n}</span>
         <button class="btn danger" type="button" data-rmloc="${esc(l.id)}"${n ? " disabled title=\"Move its kit out first\"" : ""}>Remove</button></div>`;
     }).join("") || `<p class="hint">No locations yet.</p>`;
   }
   $("btnLocs").onclick = () => { if (!db) { toast("Sign in to claude.ai to edit your kit."); return; } renderLocs(); $("dlgLocs").showModal(); };
   $("locList").addEventListener("change", async (e) => {
+    const w = e.target.closest("[data-weight]");
+    if (w) {
+      const v = w.value.trim() === "" ? null : Number(w.value);
+      if (v !== null && !(v >= 0)) { toast("Weight must be a number of kg."); return; }
+      try { await db.collection("locations").doc(w.dataset.weight).update({ weight: v }); toast(v === null ? "Weight cleared" : `Weight set to ${v} kg`); } catch (err) { fail(err); }
+      return;
+    }
     const inp = e.target.closest("[data-rename]"); if (!inp) return;
     const name = inp.value.trim(); if (!name) { renderLocs(); return; }
     try { await db.collection("locations").doc(inp.dataset.rename).update({ name }); toast("Renamed"); } catch (err) { fail(err); }
