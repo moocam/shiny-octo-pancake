@@ -141,7 +141,22 @@ textarea { min-height: 140px; resize: vertical; }
   position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(80px + env(safe-area-inset-bottom, 0px));
   background: var(--ink); color: var(--bg); padding: 8px 14px; border-radius: 6px; font-size: .9rem; z-index: 20;
 }
-@media (prefers-reduced-motion: no-preference) { .item { transition: background .15s; } }
+@media (prefers-reduced-motion: no-preference) { .item { transition: background .15s, opacity .15s; } }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; background: var(--surface); }
+.seg button { border: 0; background: none; padding: 7px 14px; font-weight: 600; font-size: .9rem; cursor: pointer; }
+.seg button[aria-pressed="true"] { background: var(--ink); color: var(--bg); }
+.packbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.packbar input { flex: 1 1 180px; min-width: 0; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); }
+.progress { flex: 1 1 100%; height: 6px; background: var(--line); border-radius: 3px; overflow: hidden; }
+.progress i { display: block; height: 100%; background: var(--accent); width: 0; }
+@media (prefers-reduced-motion: no-preference) { .progress i { transition: width .2s; } }
+.ptext { font-family: var(--font-mono); font-size: .85rem; font-variant-numeric: tabular-nums; }
+body.pack .item { grid-template-columns: auto 1fr; }
+body.pack .item input[type=checkbox] { width: 24px; height: 24px; }
+.item.packed { opacity: .5; }
+.item.packed .name { text-decoration: line-through; text-decoration-color: var(--muted); }
+.done { color: var(--accent); }
+label.item { font-size: inherit; font-weight: 400; color: var(--ink); cursor: pointer; }
 </style>
 
 <div class="wrap">
@@ -149,8 +164,19 @@ textarea { min-height: 140px; resize: vertical; }
     <div class="toprow">
       <h1>Flowmo <span>Kit</span></h1>
       <span class="count" id="total"></span>
+      <div class="seg" role="group" aria-label="Mode">
+        <button type="button" data-mode="kit" aria-pressed="true">Kit</button>
+        <button type="button" data-mode="pack" aria-pressed="false">Pack</button>
+      </div>
       <button class="btn" id="btnLocs" type="button">Locations</button>
       <button class="btn primary" id="btnAdd" type="button">Add kit</button>
+    </div>
+    <div class="packbar" id="packbar" hidden>
+      <input id="jobName" placeholder="Job name, e.g. Matchroom, Sheffield" autocomplete="off" aria-label="Job name">
+      <span class="ptext" id="ptext"></span>
+      <button class="chip" type="button" id="hidePacked" aria-pressed="false">Hide packed</button>
+      <button class="btn" type="button" id="newJob">Start new job</button>
+      <div class="progress" aria-hidden="true"><i id="pbar"></i></div>
     </div>
     <input class="search" id="q" type="search" placeholder="Search name, serial, notes" autocomplete="off">
     <div class="chips" id="chips" role="toolbar" aria-label="Filter by location"></div>
@@ -215,7 +241,10 @@ textarea { min-height: 140px; resize: vertical; }
 <script>
 (() => {
   const $ = (id) => document.getElementById(id);
-  const state = { items: [], locs: [], filter: "all", q: "", selected: new Set(), editing: null, tab: "one", itemsReady: false, locsReady: false };
+  const state = { items: [], locs: [], filter: "all", q: "", selected: new Set(), editing: null, tab: "one", itemsReady: false, locsReady: false,
+    mode: "kit", hidePacked: false, pack: { job: "", ticked: {} } };
+  try { if (localStorage.getItem("mode") === "pack") state.mode = "pack"; } catch (e) {}
+  const isPacked = (id) => !!state.pack.ticked[id];
   let db = null;
 
   // ---------- helpers ----------
@@ -236,13 +265,31 @@ textarea { min-height: 140px; resize: vertical; }
   // ---------- render ----------
   function render() {
     const ready = state.itemsReady && state.locsReady;
-    $("total").textContent = ready ? `${state.items.length} items` : "";
-    const counts = {};
-    state.items.forEach((i) => { const k = state.locs.some((l) => l.id === i.locationId) ? i.locationId : ""; counts[k] = (counts[k] || 0) + 1; });
+    const pack = state.mode === "pack";
+    document.body.classList.toggle("pack", pack);
+    document.querySelectorAll("[data-mode]").forEach((b) => b.setAttribute("aria-pressed", b.dataset.mode === state.mode));
+    $("packbar").hidden = !pack;
+    $("hidePacked").setAttribute("aria-pressed", state.hidePacked);
+    if (document.activeElement !== $("jobName")) $("jobName").value = state.pack.job || "";
+    $("total").textContent = ready && !pack ? `${state.items.length} items` : "";
+    const counts = {}, packedCounts = {};
+    state.items.forEach((i) => {
+      const k = state.locs.some((l) => l.id === i.locationId) ? i.locationId : "";
+      counts[k] = (counts[k] || 0) + 1;
+      if (isPacked(i.id)) packedCounts[k] = (packedCounts[k] || 0) + 1;
+    });
+    const totalPacked = state.items.filter((i) => isPacked(i.id)).length;
+    const fmt = (k, n) => pack ? `${packedCounts[k] || 0}/${n}` : n;
 
-    const chipData = [{ id: "all", name: "All", n: state.items.length }, ...state.locs.map((l) => ({ id: l.id, name: l.name, n: counts[l.id] || 0 }))];
+    // Progress counts the location filter's scope, so "All" = whole kit, a box chip = that box.
+    const scope = state.filter === "all" ? state.items : state.items.filter((i) => (state.locs.some((l) => l.id === i.locationId) ? i.locationId : "") === state.filter);
+    const sp = scope.filter((i) => isPacked(i.id)).length;
+    $("ptext").innerHTML = scope.length && sp === scope.length ? `<span class="done">All ${scope.length} packed</span>` : `${sp}/${scope.length} packed`;
+    $("pbar").style.width = scope.length ? `${(sp / scope.length) * 100}%` : "0";
+
+    const chipData = [{ id: "all", name: "All", n: state.items.length, p: totalPacked }, ...state.locs.map((l) => ({ id: l.id, name: l.name, n: counts[l.id] || 0 }))];
     if (counts[""]) chipData.push({ id: "", name: "Unassigned", n: counts[""] });
-    $("chips").innerHTML = chipData.map((c) => `<button class="chip" type="button" data-f="${esc(c.id)}" aria-pressed="${state.filter === c.id}">${esc(c.name)} <b>${c.n}</b></button>`).join("");
+    $("chips").innerHTML = chipData.map((c) => `<button class="chip" type="button" data-f="${esc(c.id)}" aria-pressed="${state.filter === c.id}">${esc(c.name)} <b>${c.id === "all" ? (pack ? `${c.p}/${c.n}` : c.n) : fmt(c.id, c.n)}</b></button>`).join("");
 
     const cats = [...new Set(state.items.map((i) => i.category).filter(Boolean))].sort();
     $("cats").innerHTML = cats.map((c) => `<option value="${esc(c)}">`).join("");
@@ -257,10 +304,11 @@ textarea { min-height: 140px; resize: vertical; }
     const visible = state.items.filter((i) => {
       const lid = state.locs.some((l) => l.id === i.locationId) ? i.locationId : "";
       if (state.filter !== "all" && lid !== state.filter) return false;
+      if (pack && state.hidePacked && isPacked(i.id)) return false;
       if (!q) return true;
       return [i.name, i.category, i.serial, i.notes].some((v) => String(v || "").toLowerCase().includes(q));
     });
-    if (!visible.length) { main.innerHTML = `<p class="status">Nothing matches.</p>`; return; }
+    if (!visible.length) { main.innerHTML = `<p class="status">${pack && state.hidePacked ? "Everything here is packed." : "Nothing matches."}</p>`; return; }
 
     const groups = [...state.locs.map((l) => ({ id: l.id, name: l.name })), { id: "", name: "Unassigned" }]
       .map((g) => ({ ...g, items: visible.filter((i) => (state.locs.some((l) => l.id === i.locationId) ? i.locationId : "") === g.id) }))
@@ -268,8 +316,15 @@ textarea { min-height: 140px; resize: vertical; }
 
     main.innerHTML = groups.map((g) => `
       <section class="group">
-        <h2><span>${esc(g.name)}</span><span class="n">${g.items.length}</span></h2>
-        <div class="list">${g.items.sort((a, b) => (a.category || "").localeCompare(b.category || "") || a.name.localeCompare(b.name)).map((i) => `
+        <h2><span>${esc(g.name)}</span><span class="n">${pack ? `${packedCounts[g.id] || 0}/${counts[g.id] || 0} packed` : g.items.length}</span></h2>
+        <div class="list">${g.items.sort((a, b) => (a.category || "").localeCompare(b.category || "") || a.name.localeCompare(b.name)).map((i) => pack ? `
+          <label class="item${isPacked(i.id) ? " packed" : ""}">
+            <input type="checkbox" data-tick="${esc(i.id)}"${isPacked(i.id) ? " checked" : ""}>
+            <span class="info" style="cursor:pointer">
+              <div class="name">${esc(i.name)}</div>
+              <div class="meta">${i.category ? `<span>${esc(i.category)}</span>` : ""}${i.notes ? `<span>${esc(i.notes)}</span>` : ""}</div>
+            </span>
+          </label>` : `
           <div class="item${state.selected.has(i.id) ? " sel" : ""}">
             <input type="checkbox" data-sel="${esc(i.id)}" aria-label="Select ${esc(i.name)}"${state.selected.has(i.id) ? " checked" : ""}>
             <button class="info" type="button" data-edit="${esc(i.id)}">
@@ -284,7 +339,7 @@ textarea { min-height: 140px; resize: vertical; }
 
   function renderBulk() {
     const n = state.selected.size;
-    $("bulk").hidden = n === 0;
+    $("bulk").hidden = n === 0 || state.mode === "pack";
     $("bulkN").textContent = `${n} selected`;
     const keep = $("bulkTo").value;
     $("bulkTo").innerHTML = locOptions(keep || state.locs[0]?.id);
@@ -296,10 +351,47 @@ textarea { min-height: 140px; resize: vertical; }
     catch (e) { fail(e); render(); }
   }
 
+  // ---------- pack mode ----------
+  // One doc holds the current job's ticks. Writes are serialised; while local changes are unsaved,
+  // incoming snapshots don't overwrite them.
+  let packDirty = false, packInflight = false, packTimer;
+  function savePack() {
+    packDirty = true; clearTimeout(packTimer);
+    packTimer = setTimeout(flushPack, 350);
+  }
+  async function flushPack() {
+    if (packInflight || !db) return;
+    packInflight = true; packDirty = false;
+    try { await db.doc("packs/current").set({ job: state.pack.job || "", ticked: { ...state.pack.ticked }, updatedAt: Date.now() }); }
+    catch (e) { fail(e); }
+    finally { packInflight = false; if (packDirty) flushPack(); }
+  }
+  document.querySelectorAll("[data-mode]").forEach((b) => b.addEventListener("click", () => {
+    state.mode = b.dataset.mode; state.selected.clear();
+    try { localStorage.setItem("mode", state.mode); } catch (e) {}
+    render(); renderBulk();
+  }));
+  $("hidePacked").onclick = () => { state.hidePacked = !state.hidePacked; render(); };
+  $("jobName").addEventListener("input", (e) => { state.pack.job = e.target.value; savePack(); });
+  $("newJob").onclick = () => {
+    const b = $("newJob");
+    if (!b.dataset.armed) { b.dataset.armed = "1"; b.textContent = "Clear all ticks?"; setTimeout(() => { b.dataset.armed = ""; b.textContent = "Start new job"; }, 4000); return; }
+    b.dataset.armed = ""; b.textContent = "Start new job";
+    state.pack = { job: "", ticked: {} }; savePack(); render(); toast("Ticks cleared. Ready for the next job."); $("jobName").focus();
+  };
+
   // ---------- events ----------
   $("chips").addEventListener("click", (e) => { const b = e.target.closest("[data-f]"); if (!b) return; state.filter = b.dataset.f; render(); });
   $("q").addEventListener("input", (e) => { state.q = e.target.value; render(); });
   $("main").addEventListener("change", (e) => {
+    const t = e.target.closest("[data-tick]");
+    if (t) {
+      const ticked = { ...state.pack.ticked };
+      if (t.checked) ticked[t.dataset.tick] = true; else delete ticked[t.dataset.tick];
+      state.pack = { ...state.pack, ticked }; savePack();
+      if (state.hidePacked) setTimeout(render, 250); else render();
+      return;
+    }
     const s = e.target.closest("[data-move]"); if (s) { moveItem(s.dataset.move, s.value); return; }
     const c = e.target.closest("[data-sel]"); if (c) { c.checked ? state.selected.add(c.dataset.sel) : state.selected.delete(c.dataset.sel); c.closest(".item").classList.toggle("sel", c.checked); renderBulk(); }
   });
@@ -413,6 +505,12 @@ textarea { min-height: 140px; resize: vertical; }
       state.locsReady = true; render(); renderBulk();
       if ($("dlgLocs").open) renderLocs();
     }, onErr);
+    db.doc("packs/current").onSnapshot((snap) => {
+      if (packDirty || packInflight) return;
+      const d = snap.exists ? snap.data() : {};
+      state.pack = { job: d.job || "", ticked: { ...(d.ticked || {}) } };
+      render();
+    }, (e) => console.error(e));
     db.collection("items").onSnapshot((snap) => {
       clearTimeout(timer);
       state.items = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
