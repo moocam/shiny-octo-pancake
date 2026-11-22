@@ -137,6 +137,8 @@ textarea { min-height: 140px; resize: vertical; }
 .loc-row input { flex: 1; min-width: 0; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); }
 .loc-row .n { font-family: var(--font-mono); font-size: .8rem; color: var(--muted); width: 3ch; text-align: right; }
 .hint { font-size: .8rem; color: var(--muted); margin: 0; }
+.confirm { display: flex; gap: 6px; }
+.confirm .btn { padding: 6px 10px; font-size: .85rem; }
 .loc-row input.kgin { flex: 0 0 72px; width: 72px; font-family: var(--font-mono); font-size: .85rem; }
 .group h2 .kg { font-family: var(--font-mono); font-size: .8rem; letter-spacing: 0; text-transform: none; margin-left: 6px; opacity: .8; }
 .toast {
@@ -355,7 +357,9 @@ label.item { font-size: inherit; font-weight: 400; color: var(--ink); cursor: po
               <div class="name">${esc(i.name)}</div>
               <div class="meta">${i.category ? `<span>${esc(i.category)}</span>` : ""}${i.serial ? `<span class="serial">S/N ${esc(i.serial)}</span>` : ""}${i.notes ? `<span>${esc(i.notes)}</span>` : ""}</div>
             </button>
-            <select class="move" data-move="${esc(i.id)}" aria-label="Location of ${esc(i.name)}">${locOptions(g.id, !g.id)}</select>
+            ${state.confirmDel === i.id
+              ? `<span class="confirm"><button class="btn danger" type="button" data-delyes="${esc(i.id)}">Delete</button><button class="btn" type="button" data-delno>Keep</button></span>`
+              : `<select class="move" data-move="${esc(i.id)}" aria-label="Location of ${esc(i.name)}">${locOptions(g.id, !g.id)}<option disabled>──────────</option><option value="__delete">Delete item…</option></select>`}
           </div>`).join("")}
         </div>
       </section>`).join("");
@@ -488,12 +492,25 @@ label.item { font-size: inherit; font-weight: 400; color: var(--ink); cursor: po
       if (state.hidePacked) setTimeout(render, 250); else render();
       return;
     }
-    const s = e.target.closest("[data-move]"); if (s) { moveItem(s.dataset.move, s.value); return; }
+    const s = e.target.closest("[data-move]");
+    if (s) {
+      if (s.value === "__delete") { state.confirmDel = s.dataset.move; render(); return; }
+      moveItem(s.dataset.move, s.value); return;
+    }
     const c = e.target.closest("[data-sel]"); if (c) { c.checked ? state.selected.add(c.dataset.sel) : state.selected.delete(c.dataset.sel); c.closest(".item").classList.toggle("sel", c.checked); renderBulk(); }
   });
   $("main").addEventListener("click", (e) => {
     const ed = e.target.closest("[data-edit]"); if (ed) openItem(ed.dataset.edit);
     if (e.target.closest("[data-act=add]")) openItem(null);
+    if (e.target.closest("[data-delno]")) { state.confirmDel = null; render(); }
+    const dy = e.target.closest("[data-delyes]");
+    if (dy) {
+      const id = dy.dataset.delyes, name = state.items.find((i) => i.id === id)?.name || "Item";
+      dy.disabled = true;
+      db.collection("items").doc(id).delete()
+        .then(() => { state.confirmDel = null; state.selected.delete(id); renderBulk(); toast(`Deleted ${name}`); })
+        .catch((err) => { state.confirmDel = null; render(); fail(err); });
+    }
   });
   $("bulkClear").onclick = () => { state.selected.clear(); renderBulk(); render(); };
   $("bulkGo").onclick = async () => {
