@@ -138,6 +138,10 @@ textarea { min-height: 140px; resize: vertical; }
 .loc-row .n { font-family: var(--font-mono); font-size: .8rem; color: var(--muted); width: 3ch; text-align: right; }
 .hint { font-size: .8rem; color: var(--muted); margin: 0; }
 .confirm { display: flex; gap: 6px; }
+.group h2 { align-items: center; }
+.group h2 label.boxsel { display: flex; flex-direction: row; align-items: center; gap: 10px; font: inherit; color: inherit; cursor: pointer; min-width: 0; }
+.boxsel input { width: 20px; height: 20px; margin: 0 0 0 13px; accent-color: var(--accent); flex: none; }
+body.pack .boxsel input { width: 24px; height: 24px; margin-left: 11px; }
 .confirm .btn { padding: 6px 10px; font-size: .85rem; }
 .loc-row input.kgin { flex: 0 0 72px; width: 72px; font-family: var(--font-mono); font-size: .85rem; }
 .group h2 .kg { font-family: var(--font-mono); font-size: .8rem; letter-spacing: 0; text-transform: none; margin-left: 6px; opacity: .8; }
@@ -340,9 +344,12 @@ label.item { font-size: inherit; font-weight: 400; color: var(--ink); cursor: po
       .map((g) => ({ ...g, items: visible.filter((i) => (state.locs.some((l) => l.id === i.locationId) ? i.locationId : "") === g.id) }))
       .filter((g) => g.items.length);
 
-    main.innerHTML = groups.map((g) => `
+    main.innerHTML = groups.map((g) => {
+      const on = g.items.filter((i) => pack ? isPacked(i.id) : state.selected.has(i.id)).length;
+      const all = on === g.items.length, some = on > 0 && !all;
+      return `
       <section class="group">
-        <h2><span>${esc(g.name)}${g.weight ? ` <span class="kg">${esc(g.weight)} kg</span>` : ""}</span><span class="n">${pack ? `${packedCounts[g.id] || 0}/${counts[g.id] || 0} packed` : g.items.length}</span></h2>
+        <h2><label class="boxsel"><input type="checkbox" data-box${all ? " checked" : ""}${some ? ' data-indet="1"' : ""} aria-label="${pack ? "Pack" : "Select"} everything in ${esc(g.name)}"><span>${esc(g.name)}${g.weight ? ` <span class="kg">${esc(g.weight)} kg</span>` : ""}</span></label><span class="n">${pack ? `${packedCounts[g.id] || 0}/${counts[g.id] || 0} packed` : g.items.length}</span></h2>
         <div class="list">${g.items.sort((a, b) => (a.category || "").localeCompare(b.category || "") || a.name.localeCompare(b.name)).map((i) => pack ? `
           <label class="item${isPacked(i.id) ? " packed" : ""}">
             <input type="checkbox" data-tick="${esc(i.id)}"${isPacked(i.id) ? " checked" : ""}>
@@ -362,7 +369,8 @@ label.item { font-size: inherit; font-weight: 400; color: var(--ink); cursor: po
               : `<select class="move" data-move="${esc(i.id)}" aria-label="Location of ${esc(i.name)}">${locOptions(g.id, !g.id)}<option disabled>──────────</option><option value="__delete">Delete item…</option></select>`}
           </div>`).join("")}
         </div>
-      </section>`).join("");
+      </section>`; }).join("");
+    main.querySelectorAll("[data-indet]").forEach((el) => { el.indeterminate = true; });
   }
 
   function renderBulk() {
@@ -484,6 +492,22 @@ label.item { font-size: inherit; font-weight: 400; color: var(--ink); cursor: po
   $("chips").addEventListener("click", (e) => { const b = e.target.closest("[data-f]"); if (!b) return; state.filter = b.dataset.f; render(); });
   $("q").addEventListener("input", (e) => { state.q = e.target.value; render(); });
   $("main").addEventListener("change", (e) => {
+    const bx = e.target.closest("[data-box]");
+    if (bx) {
+      const sec = bx.closest("section");
+      const ids = [...sec.querySelectorAll(state.mode === "pack" ? "[data-tick]" : "[data-sel]")].map((c) => c.dataset.tick || c.dataset.sel);
+      if (state.mode === "pack") {
+        const ticked = { ...state.pack.ticked };
+        ids.forEach((id) => { if (bx.checked) ticked[id] = true; else delete ticked[id]; });
+        state.pack = { ...state.pack, ticked, startedAt: state.pack.startedAt || Date.now() }; savePack();
+        if (bx.checked) toast(`Packed ${ids.length} items`);
+      } else {
+        ids.forEach((id) => { bx.checked ? state.selected.add(id) : state.selected.delete(id); });
+        renderBulk();
+      }
+      render();
+      return;
+    }
     const t = e.target.closest("[data-tick]");
     if (t) {
       const ticked = { ...state.pack.ticked };
@@ -497,7 +521,7 @@ label.item { font-size: inherit; font-weight: 400; color: var(--ink); cursor: po
       if (s.value === "__delete") { state.confirmDel = s.dataset.move; render(); return; }
       moveItem(s.dataset.move, s.value); return;
     }
-    const c = e.target.closest("[data-sel]"); if (c) { c.checked ? state.selected.add(c.dataset.sel) : state.selected.delete(c.dataset.sel); c.closest(".item").classList.toggle("sel", c.checked); renderBulk(); }
+    const c = e.target.closest("[data-sel]"); if (c) { c.checked ? state.selected.add(c.dataset.sel) : state.selected.delete(c.dataset.sel); renderBulk(); render(); }
   });
   $("main").addEventListener("click", (e) => {
     const ed = e.target.closest("[data-edit]"); if (ed) openItem(ed.dataset.edit);
