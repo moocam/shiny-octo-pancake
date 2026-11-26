@@ -176,6 +176,13 @@ body.pack .item input[type=checkbox] { width: 24px; height: 24px; }
 .jitem input { width: 20px; height: 20px; accent-color: var(--accent); flex: none; }
 .jitem.back span { color: var(--muted); }
 label.item { font-size: inherit; font-weight: 400; color: var(--ink); cursor: pointer; }
+#tplSel { padding: 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); max-width: 100%; }
+#tplSel.on { border-color: var(--accent); background: var(--accent-soft); font-weight: 600; }
+.toast { display: flex; gap: 14px; align-items: center; max-width: calc(100vw - 32px); }
+.toast button { background: none; border: 0; color: var(--accent); font-weight: 700; cursor: pointer; padding: 2px 4px; text-transform: uppercase; letter-spacing: .04em; font-size: .85rem; }
+.tpl-row { display: flex; gap: 8px; align-items: center; }
+.tpl-row span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.tpl-row .n { flex: none; font-family: var(--font-mono); font-size: .8rem; color: var(--muted); }
 </style>
 
 <div class="wrap">
@@ -188,10 +195,13 @@ label.item { font-size: inherit; font-weight: 400; color: var(--ink); cursor: po
         <button type="button" data-mode="pack" aria-pressed="false">Pack</button>
       </div>
       <button class="btn" id="btnLocs" type="button">Locations</button>
+      <button class="btn" id="btnExport" type="button" hidden>Export</button>
       <button class="btn primary" id="btnAdd" type="button">Add kit</button>
     </div>
     <div class="packbar" id="packbar" hidden>
       <input id="jobName" placeholder="Job name, e.g. Matchroom, Sheffield" autocomplete="off" aria-label="Job name">
+      <select id="tplSel" aria-label="Pack list"></select>
+      <button class="btn" type="button" id="btnTpl">Lists</button>
       <span class="ptext" id="ptext"></span>
       <button class="chip" type="button" id="hidePacked" aria-pressed="false">Hide packed</button>
       <button class="btn primary" type="button" id="finishJob">Finish job</button>
@@ -266,13 +276,28 @@ label.item { font-size: inherit; font-weight: 400; color: var(--ink); cursor: po
   </div>
 </dialog>
 
+<dialog id="dlgTpl">
+  <div class="dlg">
+    <h3>Pack lists</h3>
+    <p class="hint">A pack list is a saved set of kit for a type of job, like "Interview 2-cam". Pick one in Pack mode and only that kit shows, ready to tick.</p>
+    <div class="loc-row">
+      <input id="tplName" placeholder="List name, e.g. Interview 2-cam" autocomplete="off" aria-label="New list name">
+      <button class="btn primary" id="tplSaveNow" type="button">Save ticked</button>
+    </div>
+    <p class="hint" id="tplSaveHint"></p>
+    <div id="tplList" style="display:grid;gap:8px"></div>
+    <div class="actions"><button class="btn" type="button" data-close>Done</button></div>
+  </div>
+</dialog>
+
 <datalist id="cats"></datalist>
 
 <script>
 (() => {
   const $ = (id) => document.getElementById(id);
   const state = { items: [], locs: [], filter: "all", q: "", selected: new Set(), editing: null, tab: "one", itemsReady: false, locsReady: false,
-    mode: "kit", hidePacked: false, pack: { job: "", ticked: {}, startedAt: 0 }, jobs: [], openJob: null };
+    mode: "kit", hidePacked: false, pack: { job: "", ticked: {}, startedAt: 0, list: null, listName: "" }, jobs: [], openJob: null, templates: [] };
+  const emptyPack = () => ({ job: "", ticked: {}, startedAt: 0, list: null, listName: "" });
   try { if (localStorage.getItem("mode") === "pack") state.mode = "pack"; } catch (e) {}
   const isPacked = (id) => !!state.pack.ticked[id];
   let db = null;
@@ -281,12 +306,21 @@ label.item { font-size: inherit; font-weight: 400; color: var(--ink); cursor: po
   const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   const locName = (id) => state.locs.find((l) => l.id === id)?.name || "Unassigned";
   let toastTimer;
-  function toast(msg) {
+  // toast(msg, undo?): with an undo function, shows an Undo button for 6 seconds.
+  function toast(msg, undo) {
     let t = document.querySelector(".toast");
     if (!t) { t = document.createElement("div"); t.className = "toast"; t.setAttribute("role", "status"); document.body.appendChild(t); }
-    t.textContent = msg; t.hidden = false;
-    clearTimeout(toastTimer); toastTimer = setTimeout(() => { t.hidden = true; }, 2200);
+    t.replaceChildren();
+    const s = document.createElement("span"); s.textContent = msg; t.appendChild(s);
+    if (undo) {
+      const b = document.createElement("button"); b.type = "button"; b.textContent = "Undo";
+      b.onclick = async () => { t.hidden = true; b.disabled = true; try { await undo(); toast("Undone"); } catch (e) { fail(e); } };
+      t.appendChild(b);
+    }
+    t.hidden = false;
+    clearTimeout(toastTimer); toastTimer = setTimeout(() => { t.hidden = true; }, undo ? 6000 : 2200);
   }
+  const itemData = (it) => { const { id, ...rest } = it; return rest; };
   function fail(e) { console.error(e); toast(e?.code === "permission_denied" ? "Only the owner can change this list." : "Couldn't save. Check your connection and try again."); }
   const locOptions = (selected, withUnassigned) =>
     (withUnassigned ? `<option value="">Unassigned</option>` : "") +
@@ -302,22 +336,30 @@ label.item { font-size: inherit; font-weight: 400; color: var(--ink); cursor: po
     $("hidePacked").setAttribute("aria-pressed", state.hidePacked);
     if (document.activeElement !== $("jobName")) $("jobName").value = state.pack.job || "";
     $("total").textContent = ready && !pack ? `${state.items.length} items` : "";
+    // In Pack mode with a pack list chosen, everything below works on that list only.
+    const listSet = pack && state.pack.list ? new Set(state.pack.list) : null;
+    const pool = listSet ? state.items.filter((i) => listSet.has(i.id)) : state.items;
+    const tplSel = $("tplSel");
+    tplSel.innerHTML = `<option value="">All kit</option>` + state.templates.map((t) => `<option value="${esc(t.id)}">${esc(t.name)}</option>`).join("")
+      + (state.pack.list && !state.templates.some((t) => t.id === state.pack.listId) ? `<option value="__cur">${esc(state.pack.listName || "Current list")}</option>` : "");
+    tplSel.value = state.pack.list ? (state.templates.some((t) => t.id === state.pack.listId) ? state.pack.listId : "__cur") : "";
+    tplSel.classList.toggle("on", !!state.pack.list);
     const counts = {}, packedCounts = {};
-    state.items.forEach((i) => {
+    pool.forEach((i) => {
       const k = state.locs.some((l) => l.id === i.locationId) ? i.locationId : "";
       counts[k] = (counts[k] || 0) + 1;
       if (isPacked(i.id)) packedCounts[k] = (packedCounts[k] || 0) + 1;
     });
-    const totalPacked = state.items.filter((i) => isPacked(i.id)).length;
+    const totalPacked = pool.filter((i) => isPacked(i.id)).length;
     const fmt = (k, n) => pack ? `${packedCounts[k] || 0}/${n}` : n;
 
     // Progress counts the location filter's scope, so "All" = whole kit, a box chip = that box.
-    const scope = state.filter === "all" ? state.items : state.items.filter((i) => (state.locs.some((l) => l.id === i.locationId) ? i.locationId : "") === state.filter);
+    const scope = state.filter === "all" ? pool : pool.filter((i) => (state.locs.some((l) => l.id === i.locationId) ? i.locationId : "") === state.filter);
     const sp = scope.filter((i) => isPacked(i.id)).length;
     $("ptext").innerHTML = scope.length && sp === scope.length ? `<span class="done">All ${scope.length} packed</span>` : `${sp}/${scope.length} packed`;
     $("pbar").style.width = scope.length ? `${(sp / scope.length) * 100}%` : "0";
 
-    const chipData = [{ id: "all", name: "All", n: state.items.length, p: totalPacked }, ...state.locs.map((l) => ({ id: l.id, name: l.name, n: counts[l.id] || 0 }))];
+    const chipData = [{ id: "all", name: "All", n: pool.length, p: totalPacked }, ...state.locs.map((l) => ({ id: l.id, name: l.name, n: counts[l.id] || 0 })).filter((c) => !listSet || c.n || state.filter === c.id)];
     if (counts[""]) chipData.push({ id: "", name: "Unassigned", n: counts[""] });
     $("chips").innerHTML = chipData.map((c) => `<button class="chip" type="button" data-f="${esc(c.id)}" aria-pressed="${state.filter === c.id}">${esc(c.name)} <b>${c.id === "all" ? (pack ? `${c.p}/${c.n}` : c.n) : fmt(c.id, c.n)}</b></button>`).join("");
 
@@ -331,7 +373,7 @@ label.item { font-size: inherit; font-weight: 400; color: var(--ink); cursor: po
       return;
     }
     const q = state.q.trim().toLowerCase();
-    const visible = state.items.filter((i) => {
+    const visible = pool.filter((i) => {
       const lid = state.locs.some((l) => l.id === i.locationId) ? i.locationId : "";
       if (state.filter !== "all" && lid !== state.filter) return false;
       if (pack && state.hidePacked && isPacked(i.id)) return false;
@@ -383,8 +425,19 @@ label.item { font-size: inherit; font-weight: 400; color: var(--ink); cursor: po
 
   // ---------- writes ----------
   async function moveItem(id, locationId) {
-    try { await db.collection("items").doc(id).update({ locationId, updatedAt: Date.now() }); toast(`Moved to ${locName(locationId)}`); }
+    const it = state.items.find((i) => i.id === id); const prev = it?.locationId ?? "";
+    try {
+      await db.collection("items").doc(id).update({ locationId, updatedAt: Date.now() });
+      toast(`Moved ${it?.name || "item"} to ${locName(locationId)}`, () => db.collection("items").doc(id).update({ locationId: prev, updatedAt: Date.now() }));
+    }
     catch (e) { fail(e); render(); }
+  }
+  async function deleteItem(id) {
+    const it = state.items.find((i) => i.id === id); if (!it) return;
+    const data = itemData(it);
+    await db.collection("items").doc(id).delete();
+    state.selected.delete(id); renderBulk();
+    toast(`Deleted ${it.name}`, () => db.collection("items").doc(id).set(data));
   }
 
   // ---------- pack mode ----------
@@ -398,7 +451,8 @@ label.item { font-size: inherit; font-weight: 400; color: var(--ink); cursor: po
   async function flushPack() {
     if (packInflight || !db) return;
     packInflight = true; packDirty = false;
-    try { await db.doc("packs/current").set({ job: state.pack.job || "", ticked: { ...state.pack.ticked }, startedAt: state.pack.startedAt || 0, updatedAt: Date.now() }); }
+    try { await db.doc("packs/current").set({ job: state.pack.job || "", ticked: { ...state.pack.ticked }, startedAt: state.pack.startedAt || 0,
+      list: state.pack.list ? [...state.pack.list] : null, listId: state.pack.listId || "", listName: state.pack.listName || "", updatedAt: Date.now() }); }
     catch (e) { fail(e); }
     finally { packInflight = false; if (packDirty) flushPack(); }
   }
@@ -413,7 +467,65 @@ label.item { font-size: inherit; font-weight: 400; color: var(--ink); cursor: po
     const b = $("newJob");
     if (!b.dataset.armed) { b.dataset.armed = "1"; b.textContent = "Clear without saving?"; setTimeout(() => { b.dataset.armed = ""; b.textContent = "Clear ticks"; }, 4000); return; }
     b.dataset.armed = ""; b.textContent = "Clear ticks";
-    state.pack = { job: "", ticked: {}, startedAt: 0 }; savePack(); render(); toast("Ticks cleared."); $("jobName").focus();
+    state.pack = emptyPack(); savePack(); render(); toast("Ticks cleared."); $("jobName").focus();
+  };
+
+  // ---------- pack lists (templates) ----------
+  $("tplSel").addEventListener("change", (e) => {
+    const v = e.target.value; if (v === "__cur") return;
+    if (!v) { state.pack = { ...state.pack, list: null, listId: "", listName: "" }; }
+    else {
+      const t = state.templates.find((x) => x.id === v); if (!t) return;
+      const ids = new Set(state.items.map((i) => i.id));
+      const list = (t.itemIds || []).filter((id) => ids.has(id));
+      const ticked = {}; list.forEach((id) => { if (state.pack.ticked[id]) ticked[id] = true; });
+      state.pack = { ...state.pack, list, listId: t.id, listName: t.name, ticked, job: state.pack.job || "" };
+      const gone = (t.itemIds || []).length - list.length;
+      toast(`${t.name}: ${list.length} item${list.length === 1 ? "" : "s"}${gone ? ` (${gone} deleted since saved)` : ""}`);
+    }
+    state.filter = "all"; savePack(); render();
+  });
+  function renderTpl() {
+    const n = Object.values(state.pack.ticked).filter(Boolean).length;
+    $("tplSaveHint").textContent = n ? `Saves the ${n} items ticked now.` : "Tick items in Pack mode first, then save them as a list. You can also save a list from a past job in History.";
+    $("tplSaveNow").disabled = !n;
+    $("tplList").innerHTML = state.templates.length ? state.templates.map((t) => `<div class="tpl-row"><span>${esc(t.name)}</span><span class="n">${(t.itemIds || []).length}</span>
+      <button class="btn danger" type="button" data-deltpl="${esc(t.id)}">Delete</button></div>`).join("") : `<p class="hint">No saved lists yet.</p>`;
+  }
+  $("btnTpl").onclick = () => { $("tplName").value = state.pack.listName && state.pack.listId ? "" : (state.pack.job || ""); renderTpl(); $("dlgTpl").showModal(); };
+  async function saveTemplate(name, itemIds) {
+    const ref = await db.collection("templates").add({ name, itemIds, createdAt: Date.now() });
+    toast(`Saved list "${name}" (${itemIds.length} items)`, () => ref.delete());
+  }
+  $("tplSaveNow").onclick = async () => {
+    const name = $("tplName").value.trim();
+    if (!name) { toast("Name the list first."); $("tplName").focus(); return; }
+    const ids = Object.keys(state.pack.ticked).filter((id) => state.pack.ticked[id] && state.items.some((i) => i.id === id));
+    if (!ids.length) return;
+    try { await saveTemplate(name, ids); $("tplName").value = ""; } catch (e) { fail(e); }
+  };
+  $("tplList").addEventListener("click", async (e) => {
+    const b = e.target.closest("[data-deltpl]"); if (!b) return;
+    if (!b.dataset.armed) { b.dataset.armed = "1"; b.textContent = "Sure?"; return; }
+    const t = state.templates.find((x) => x.id === b.dataset.deltpl); if (!t) return;
+    const { id, ...data } = t;
+    try {
+      await db.collection("templates").doc(id).delete();
+      toast(`Deleted list "${t.name}"`, () => db.collection("templates").doc(id).set(data));
+    } catch (err) { fail(err); }
+  });
+
+  // ---------- export ----------
+  function csvCell(v) { const s = String(v ?? ""); return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; }
+  $("btnExport").onclick = async () => {
+    const dl = await claude.use("downloads"); if (!dl) { toast("Export isn't available here."); return; }
+    const order = new Map(state.locs.map((l, i) => [l.id, i]));
+    const rows = [...state.items].sort((a, b) => (order.get(a.locationId) ?? 999) - (order.get(b.locationId) ?? 999) || a.name.localeCompare(b.name))
+      .map((i) => { const l = state.locs.find((x) => x.id === i.locationId); return [l?.name || "Unassigned", l?.weight ?? "", i.name, i.category, i.serial, i.notes]; });
+    const csv = [["Location", "Box weight (kg)", "Item", "Category", "Serial", "Notes"], ...rows].map((r) => r.map(csvCell).join(",")).join("\r\n");
+    const d = new Date(), stamp = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    try { await dl.save({ filename: `flowmo-kit-${stamp}.csv`, data: "﻿" + csv }); toast(`Exported ${rows.length} items`); }
+    catch (e) { if (e?.code !== "declined") toast("Export didn't save. Try again."); }
   };
 
   // ---------- job history ----------
@@ -431,7 +543,7 @@ label.item { font-size: inherit; font-weight: 400; color: var(--ink); cursor: po
         items: packed.map((i) => ({ id: i.id, name: i.name, location: locName(i.locationId) })),
         returned: {},
       });
-      state.pack = { job: "", ticked: {}, startedAt: 0 }; savePack(); render();
+      state.pack = emptyPack(); savePack(); render();
       toast(`Saved "${job}" with ${packed.length} items`);
     } catch (e) { fail(e); } finally { $("finishJob").disabled = false; }
   };
@@ -453,6 +565,7 @@ label.item { font-size: inherit; font-weight: 400; color: var(--ink); cursor: po
           ${Object.entries(byLoc).map(([loc, its]) => `<div class="loc">${esc(loc)}</div>` + its.map((i) => `
             <label class="jitem${ret[i.id] ? " back" : ""}"><input type="checkbox" data-ret="${esc(j.id)}|${esc(i.id)}"${ret[i.id] ? " checked" : ""}><span>${esc(i.name)}</span></label>`).join("")).join("")}
           <div class="actions" style="margin-top:8px">
+            <button class="btn" type="button" data-alltpl="${esc(j.id)}">Save as pack list</button>
             <button class="btn" type="button" data-allback="${esc(j.id)}">Mark all back</button>
             <button class="btn danger" type="button" data-deljob="${esc(j.id)}">Delete job</button>
           </div>
@@ -471,6 +584,15 @@ label.item { font-size: inherit; font-weight: 400; color: var(--ink); cursor: po
   $("histList").addEventListener("click", async (e) => {
     const h = e.target.closest("[data-job]");
     if (h) { state.openJob = state.openJob === h.dataset.job ? null : h.dataset.job; renderHist(); return; }
+    const tp = e.target.closest("[data-alltpl]");
+    if (tp) {
+      const j = state.jobs.find((x) => x.id === tp.dataset.alltpl); if (!j) return;
+      const live = new Set(state.items.map((i) => i.id));
+      const ids = (j.items || []).map((i) => i.id).filter((id) => live.has(id));
+      if (!ids.length) { toast("None of this job's kit is still in the tracker."); return; }
+      try { await saveTemplate(j.job, ids); } catch (err) { fail(err); }
+      return;
+    }
     const all = e.target.closest("[data-allback]");
     if (all) { const j = state.jobs.find((x) => x.id === all.dataset.allback); const r = {}; (j.items || []).forEach((i) => { r[i.id] = true; }); writeReturned(j.id, r); return; }
     const d = e.target.closest("[data-deljob]");
@@ -531,18 +653,20 @@ label.item { font-size: inherit; font-weight: 400; color: var(--ink); cursor: po
     if (dy) {
       const id = dy.dataset.delyes, name = state.items.find((i) => i.id === id)?.name || "Item";
       dy.disabled = true;
-      db.collection("items").doc(id).delete()
-        .then(() => { state.confirmDel = null; state.selected.delete(id); renderBulk(); toast(`Deleted ${name}`); })
+      deleteItem(id)
+        .then(() => { state.confirmDel = null; })
         .catch((err) => { state.confirmDel = null; render(); fail(err); });
     }
   });
   $("bulkClear").onclick = () => { state.selected.clear(); renderBulk(); render(); };
   $("bulkGo").onclick = async () => {
     const to = $("bulkTo").value; const ids = [...state.selected];
+    const prev = new Map(ids.map((id) => [id, state.items.find((i) => i.id === id)?.locationId ?? ""]));
     $("bulkGo").disabled = true;
     try {
       for (const id of ids) await db.collection("items").doc(id).update({ locationId: to, updatedAt: Date.now() });
-      toast(`Moved ${ids.length} to ${locName(to)}`); state.selected.clear(); renderBulk(); render();
+      toast(`Moved ${ids.length} to ${locName(to)}`, async () => { for (const [id, loc] of prev) await db.collection("items").doc(id).update({ locationId: loc, updatedAt: Date.now() }); });
+      state.selected.clear(); renderBulk(); render();
     } catch (e) { fail(e); } finally { $("bulkGo").disabled = false; }
   };
 
@@ -599,7 +723,7 @@ label.item { font-size: inherit; font-weight: 400; color: var(--ink); cursor: po
   $("btnDel").onclick = async () => {
     const b = $("btnDel");
     if (!b.dataset.armed) { b.dataset.armed = "1"; b.textContent = "Tap again to delete"; return; }
-    try { await db.collection("items").doc(state.editing).delete(); state.selected.delete(state.editing); renderBulk(); toast("Deleted"); $("dlgItem").close(); }
+    try { await deleteItem(state.editing); $("dlgItem").close(); }
     catch (e) { fail(e); }
   };
 
@@ -653,9 +777,17 @@ label.item { font-size: inherit; font-weight: 400; color: var(--ink); cursor: po
     db.doc("packs/current").onSnapshot((snap) => {
       if (packDirty || packInflight) return;
       const d = snap.exists ? snap.data() : {};
-      state.pack = { job: d.job || "", ticked: { ...(d.ticked || {}) }, startedAt: d.startedAt || 0 };
+      state.pack = { job: d.job || "", ticked: { ...(d.ticked || {}) }, startedAt: d.startedAt || 0,
+        list: Array.isArray(d.list) ? [...d.list] : null, listId: d.listId || "", listName: d.listName || "" };
       render();
     }, (e) => console.error(e));
+    db.collection("templates").onSnapshot((snap) => {
+      state.templates = snap.docs.map((d) => { const x = d.data(); return { id: d.id, ...x, itemIds: [...(x.itemIds || [])] }; })
+        .sort((a, b) => a.name.localeCompare(b.name));
+      render();
+      if ($("dlgTpl").open) renderTpl();
+    }, (e) => console.error(e));
+    claude.use("downloads").then((dl) => { if (dl) $("btnExport").hidden = false; });
     db.collection("jobs").onSnapshot((snap) => {
       state.jobs = snap.docs.map((d) => { const x = d.data(); return { id: d.id, ...x, returned: { ...(x.returned || {}) } }; })
         .sort((a, b) => (b.finishedAt || 0) - (a.finishedAt || 0));
